@@ -3,6 +3,7 @@ This repo contains a small Streamlit app for visualizing a power network and hig
 The demo is built on a cleaned subset of the Pecan Street dataset (e.g., \`CLEAN_Pecan_House1.csv\`).  
 Each numeric column is treated as a "bus" (node), and we construct a synthetic power network graph over these buses.
 
+Try this app on: https://powernetreason-qnchy4efjmkhsg2i5fbgnc.streamlit.app/
 ## Features
 
 - Interactive graph visualization of the power network
