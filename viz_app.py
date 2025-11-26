@@ -1,6 +1,4 @@
 # viz_app.py
-import numpy as np
-import pandas as pd
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -30,18 +28,23 @@ def compute_anomaly_nodes(anomaly_scores, top_k=5, thresh=None):
 
 def draw_graph_html(G, highlight_nodes=None):
     from pyvis.network import Network
-    import tempfile, os
+    import tempfile
+    import os
     import networkx as nx
+    import numpy as np
 
     highlight_nodes = set(highlight_nodes or [])
 
-    # 创建 PyVis 网络（不打开 physics）
+    # 1. 初始化
     net = Network(height="650px", width="100%", notebook=False, directed=False)
 
-    # 1) 用 NetworkX 计算一个固定的布局（seed 固定 → 每次都一样）
-    pos = nx.spring_layout(G, seed=42)  # seed 随便定一个数字就行
+    # 2. 计算固定布局 (关键修改在这里)
+    # k: 控制节点间距 (0.1~1.0)，值越大越分散
+    # iterations: 迭代次数，多跑几次让布局更舒展
+    # weight=None: 关键！忽略边的权重，防止强相关节点吸在一起变成一团
+    pos = nx.spring_layout(G, seed=42, k=0.8, iterations=100, weight=None)
 
-    # 2) 加节点：带上 x / y 坐标，physics=False
+    # 3. 添加节点
     for n, data in G.nodes(data=True):
         label = data.get("label", str(n))
         is_hi = n in highlight_nodes
@@ -49,44 +52,43 @@ def draw_graph_html(G, highlight_nodes=None):
         size = 28 if is_hi else 18
         color = "#ff6b6b" if is_hi else "#666666"
 
-        x, y = pos[n]
+        # 获取坐标
+        x_raw, y_raw = pos[n]
+
+        # 兜底防止 NaN
+        if np.isnan(x_raw) or np.isnan(y_raw):
+            x_val, y_val = 0.0, 0.0
+        else:
+            # 这里的倍数可以适当调大，比如 1200
+            x_val = float(x_raw) * 1200
+            y_val = float(y_raw) * 1200
+
         net.add_node(
             n,
             label=label,
             size=size,
             color=color,
-            x=float(x * 500),  # 放大一下坐标方便显示
-            y=float(y * 500),
-            physics=False,  # 关键：不要再让 physics 改位置
+            x=x_val,
+            y=y_val,
+            physics=False,
+            title=str(label),
         )
 
-    # 3) 加边（保持简单灰线）
+    # 4. 添加边
     for u, v, edata in G.edges(data=True):
         net.add_edge(u, v, color="#cccccc")
 
-    # 4) 关闭平滑 + physics（边是直线，节点不再乱动）
-    net.set_options(
-        """
-    var options = {
-      "edges": {
-        "smooth": false
-      },
-      "physics": {
-        "enabled": false
-      }
-    }
-    """
-    )
+    # 5. 关闭物理引擎
+    net.toggle_physics(False)
 
-    # 5) 导出成 HTML 字符串
+    # 6. 生成 HTML
     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
-
-    # 不再用 show()（它会强制 notebook=True），改用 write_html 并显式 notebook=False
     net.write_html(tmp_file.name, notebook=False)
 
     with open(tmp_file.name, "r", encoding="utf-8") as f:
         html = f.read()
     os.unlink(tmp_file.name)
+
     return html
 
 
@@ -123,7 +125,7 @@ def main():
 
     csv_path = st.sidebar.text_input(
         "CSV path",
-        value="real_data/CLEAN_Pecan_House1.csv",  # 对应你之前的 --csv
+        value="./real_data/CLEAN_Pecan_multiHouses.csv",  # 对应你之前的 --csv
     )
     resample = st.sidebar.text_input(
         "Resample (Pandas offset)",
@@ -162,9 +164,10 @@ def main():
     with st.spinner("Loading data and building graph..."):
         try:
             G, anomaly_scores = build_graph_and_anomaly_scores(
-                csv_path="real_data/CLEAN_Pecan_House1.csv",
+                csv_path="./real_data/CLEAN_Pecan_multiHouses.csv",
                 resample="1min",
                 delta_mode="pct",
+                k_neighbors=5,
                 num_zones=8,
             )
 
@@ -192,8 +195,8 @@ def main():
         )
         prompt = st.text_area("Prompt to LLM:", value=default_prompt, height=200)
 
-        st.markdown("**Preview anomalies (no LLM):**")
-        if st.button("Highlight top-K by score"):
+        st.markdown("**GT anomalies (Top-K by score):**")
+        if st.button("Show ground-truth anomalies"):
             if anomaly_scores:
                 st.session_state.highlight_nodes = compute_anomaly_nodes(
                     anomaly_scores, top_k=top_k
