@@ -147,20 +147,22 @@ def build_graph_and_anomaly_scores(
 ):
     """
     从 CSV 读数据 + 构建“相关性网络” + 基于 MAD-z 的 anomaly 分数。
-
-    参数保持和原来一样（csv_path / resample / delta_mode / num_zones），
-    所以原来的调用方式不用改。
-
-    - 节点：每个 numeric 列（bus）
-    - 边：每个 bus 连接相关性最高的 k 个其他 bus（对称补全）
-    - anomaly_scores：对 delta 序列做 MAD-z，取每个 bus 的 max z 作为分数
     """
+
     # ---- 读数据 ----
+    # 这一行是之前漏掉的 👇
     resample_arg = None if resample == "" else resample
+
     buses = load_clean_csv(csv_path, resample=resample_arg)
     delta = compute_delta(buses, mode=delta_mode)
 
     bus_names = list(buses.columns)
+
+    # 小工具：根据列名前缀识别属于哪一户（H1, H2, ...）
+    def house_of(name: str):
+        if "_" in name:
+            return name.split("_", 1)[0]
+        return None  # 老的单户版本没有前缀 → 当作同一户
 
     # --------- 1) 建图：相关性网络 ----------
     G = nx.Graph()
@@ -169,16 +171,20 @@ def build_graph_and_anomaly_scores(
 
     # 用原始值的相关性（Pearson），取绝对值
     corr = buses.corr().abs()
-    # 不和自己连边
     np.fill_diagonal(corr.values, 0.0)
 
     for b in bus_names:
-        # 对每个 bus，找相关性最高的 k 个邻居
         scores = corr[b].sort_values(ascending=False)
         neighbors = scores.head(k_neighbors).index.tolist()
         for nb in neighbors:
             if b == nb:
                 continue
+
+            # 🚫 不同 house（前缀不同）之间不连边
+            hb, hn = house_of(b), house_of(nb)
+            if hb is not None and hn is not None and hb != hn:
+                continue
+
             w = float(corr.loc[b, nb])
             if not G.has_edge(str(b), str(nb)):
                 G.add_edge(str(b), str(nb), weight=w)
