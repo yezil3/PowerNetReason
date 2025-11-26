@@ -1,5 +1,5 @@
-import numpy as np
 import pandapower as pp
+import numpy as np
 import pandas as pd
 import json
 import math
@@ -358,6 +358,7 @@ def detect_time_column(df: pd.DataFrame) -> str:
 def load_clean_csv(path: str, resample: str | None) -> pd.DataFrame:
     df = pd.read_csv(path)
     tcol = detect_time_column(df)
+
     # Parse time
     if tcol != "_idx_time_":
         df[tcol] = pd.to_datetime(df[tcol], errors="coerce")
@@ -368,14 +369,14 @@ def load_clean_csv(path: str, resample: str | None) -> pd.DataFrame:
             num = df.select_dtypes(include=[np.number])
             df = num.resample(resample).mean().dropna(how="all")
     else:
-        # simple integer index
         df = df.set_index(tcol)
 
-    # Keep only numeric columns as "buses"
+    # Keep all numeric columns as "buses"
     buses = df.select_dtypes(include=[np.number]).copy()
-    # Remove constant columns to avoid NaN percent changes
-    const_cols = [c for c in buses.columns if buses[c].nunique(dropna=True) <= 1]
-    buses = buses.drop(columns=const_cols, errors="ignore")
+
+    # （可选）只扔掉**整列都是 NaN** 的：
+    # buses = buses.dropna(axis=1, how="all")
+
     return buses
 
 
